@@ -1,0 +1,265 @@
+<!doctype html>
+<html>
+<head>
+<title>Tezure App</title>
+<link rel="stylesheet" href="http://code.jquery.com/mobile/1.1.1/jquery.mobile-1.1.1.min.css" />
+<!--<link rel="stylesheet" href="css/jquery.mobile-1.1.1.min.css" />-->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no;" />
+
+<script>
+    window.addEventListener('deviceready', function () {
+        console.log('deviceready');
+        // add your PhoneGap-dependent functionality here!
+    });
+</script>
+<script src="phonegap.0.9.5.min.js"></script>
+
+<!--Refer from CDN-->
+<!--<script src="http://crypto-js.googlecode.com/svn/tags/3.0.2/build/rollups/hmac-sha256.js"></script>-->
+<!--<script src="http://crypto-js.googlecode.com/svn/tags/3.0.2/build/components/enc-base64-min.js"></script>-->
+<!--<script src="http://cdnjs.cloudflare.com/ajax/libs/moment.js/2.8.4/moment.js"></script>-->
+<!--<script src="http://code.jquery.com/jquery-1.7.1.min.js"></script>-->
+<!--<script src="http://code.jquery.com/mobile/1.1.1/jquery.mobile-1.1.1.min.js"></script>-->
+
+
+<!--Refer locally    -->
+<script src="js/hmac-sha256.js"></script>
+<script src="js/enc-base64-min.js"></script>
+<script src="js/moment.js"></script>
+<script src="js/jquery-1.7.1.min.js"></script>
+<script src="js/jquery.mobile-1.1.1.min.js"></script>
+
+
+
+
+<script>
+    //Global variablesxx
+    var g_image = '';
+    var g_name = '';
+    var timeOutfn;
+
+   // Service bus keys
+    var m_ServiceNamespace = "iotdemoservicebus";
+    var m_SasKey = "xxxxxxxxxxxxxxxxxxxxxxxxx"; // Update with Service bus SAS key here (from Azure management site)
+    var m_SasKeyName = "manage";
+    var entityUri = "https://iotdemoservicebus.servicebus.windows.net/mobileservice";
+
+    // Expiry date for SAS Key
+    var expiry = moment().add(10, 'years').unix();
+
+    // blob settings
+    var blob_host = 'https://tezure.blob.core.windows.net';
+    var blob_container = 'tezure';
+    // StorageExplorer to generate blob SAS URL (for more details refer readme section)
+    var blob_sas = '?sv=2014-02-14&sr=c&sig=xxxxxxxxxxxxxxxxxxx&st=2015-01-21T05%3A00%3A00Z&se=2016-01-29T05%3A00%3A00Z&sp=rwdl';
+
+    $('#init').live('pagecreate',function(e) {
+        $('#camCtrl').click(function(e){
+            AzureItemClick();
+            clearImage();
+        });
+        $('#backBtn').click(function(e){
+            clearImage();
+        });
+
+    });
+
+
+    function AzureItemClick() {
+       // clearImage();
+
+        var msg = [];
+        msg.push({deviceId:'tessel',command:'capture',captureTime:moment().unix()});
+        sendMessage( JSON.stringify(msg) , "application/json");
+    }
+
+    function clearImage() {
+        clearTimeout(timeOutfn);
+        $('#display').empty();
+    }
+
+    var create_sas_token = function(uri, key_name, key)
+    {
+
+        var string_to_sign = encodeURIComponent(uri) + '\n' + expiry;
+        var hash = CryptoJS.HmacSHA256(string_to_sign, key);
+        var signature = CryptoJS.enc.Base64.stringify(hash);
+        var token = 'SharedAccessSignature sr=' + encodeURIComponent(uri) + '&sig=' + encodeURIComponent(signature) + '&se=' + expiry + '&skn=' + key_name;
+        return token;
+
+    }
+
+    var sendMessage = function (body, contentType) {
+
+        var securityToken = create_sas_token (entityUri,m_SasKeyName ,m_SasKey);
+        var sendUri = entityUri + "/messages/?timeout=60";
+        var xmlHttpRequest = new XMLHttpRequest();
+
+        xmlHttpRequest.open("POST", sendUri, true);
+        xmlHttpRequest.setRequestHeader('Content-Type', contentType);
+        xmlHttpRequest.setRequestHeader("Authorization", securityToken);
+
+        xmlHttpRequest.onreadystatechange = function () {
+
+            if (this.readyState == 4) {
+
+                var messagingResult;
+
+                if (this.status == 201) {
+                    //alert("Success Message : " + this.response);
+                    getImageFromBlob(body);
+                }
+                else {
+                    console.log ("Failure Message : " + this.response);
+                }
+
+            }
+        };
+
+        xmlHttpRequest.send(body);
+    }
+
+    var getImageFromBlob = function(imageDetailArray)
+    {
+
+        var imageDetail = $.parseJSON(imageDetailArray);
+        var picName = imageDetail[0].deviceId + '_' + imageDetail[0].captureTime + '.jpg';
+        //picName = 'tessel_1421305436.jpg';
+        var imagePath = blob_host + '/' + blob_container + '/' + picName + blob_sas;
+        $.mobile.showPageLoadingMsg();
+        timeOutfn = setTimeout(
+                function()
+                {
+                    $.get(imagePath)
+                            .done(function() {
+                                // Do something now you know the image exists.
+                                $('#display').html('<img style="display: block;width: 50%; width: 50%;" src="' + imagePath + '" /><p>' + picName + '</p>');
+                                clearTimeout(timeOutfn);
+
+                            }).fail(function() {
+                                // Image doesn't exist - do recursion.
+                                getImageFromBlob(imageDetailArray);
+
+                            })  //do something special
+
+                    $.mobile.hidePageLoadingMsg();
+                }, 3000);
+
+    }
+
+
+    //For future use
+    /*
+    var postTesselMsg = function(){
+       // alert('test');
+        console.log('Post Tessel msg');
+        var msg = [];
+        msg.push({deviceId:'tessel',command:'capture',captureTime:moment().unix()});
+        var tezureSocket = new WebSocket("ws://192.168.0.22:8081");
+        //var tezureSocket = new WebSocket("ws://24.250.57.252:8081");
+        tezureSocket.onmessage = function(res){processResponse(res,tezureSocket)};
+        tezureSocket.onopen = function(res){sendTesselMsg(tezureSocket)};
+        tezureSocket.onclose = function(res){console.log('Closed Connection to device')};
+        tezureSocket.onerror = function(res){console.log('error message: ' + res)}
+
+    }
+
+    var sendTesselMsg = function(tezureSocket){
+        var msg = [];
+        msg.push({deviceId:'tessel',command:'capture',captureTime:moment().unix()});
+        tezureSocket.send(JSON.stringify(msg));
+
+    }
+
+    var processResponse = function(response,tezureSocket)
+    {
+        console.log(response);
+        getImageFromBlob(response);
+        tezureSocket.close();
+
+    }
+    */
+</script>
+
+
+</head>
+<body>
+
+<!-- Start of first page -->
+<div data-role="page" id="init">
+
+    <div data-role="header">
+        <h1>Tezure</h1>
+    </div>
+
+    <div data-role="Content" id="camera">
+        <ul data-role="listview" >
+            <li id="camCtrl"><a href="#cam" data-url="' + url + '">Take Pic</a></li>
+        </ul>
+        <ul data-role="listview" >
+            <li id="uploadCtrl"><a href="#upload" data-url="' + url + '">Upload Pic</a></li>
+        </ul>
+        <ul data-role="listview" >
+            <li id="servoCtrl"><a href="#servo" data-url="' + url + '">Control Servo</a></li>
+        </ul>
+
+    </div>
+
+    <div data-role="footer" id="footer">
+        <h4>I-O-T on Javascript</h4>
+    </div>
+</div>
+
+
+<!-- Start of second page -->
+<div data-role="page" id="cam">
+
+    <div data-role="header">
+        <!--<a id="backBtn" href="index.html" data-icon="back">Back</a>-->
+        <!--<a data-rel="back" data-icon="home">Home</a>-->
+        <a id="backBtn" data-icon="home" data-rel="back">Home</a>
+        <h1>Tezure</h1>
+    </div>
+
+    <div data-role="content">
+        <div id="display"></div>
+    </div>
+
+    <div data-role="footer" id="footer">
+        <a id="backBtn" data-icon="back" data-rel="back">Back</a>
+        <!--<h1>I-O-T on Javascript</h1>-->
+    </div>
+</div>
+
+<div data-role="page" id="upload">
+
+    <div data-role="header">
+        <h1>Tezure</h1>
+    </div>
+
+    <div data-role="content">
+        <div id="display"></div>
+    </div>
+
+    <div data-role="footer" id="footer">
+        <h4>I-O-T on Javascript</h4>
+    </div>
+</div>
+
+<div data-role="page" id="servo">
+
+    <div data-role="header">
+        <h1>Tezure</h1>
+    </div>
+
+    <div data-role="content">
+        <div id="display"></div>
+    </div>
+
+    <div data-role="footer" id="footer">
+        <h4>I-O-T on Javascript</h4>
+    </div>
+</div>
+
+</body>
+</html>
